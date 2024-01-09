@@ -1,6 +1,7 @@
 package com.example.mymovies.ui.movies
 
 import android.app.Activity
+import android.content.Context
 import android.content.Intent
 import android.os.Bundle
 import android.os.Handler
@@ -14,39 +15,51 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import com.example.mymovies.util.Creator
 import com.example.mymovies.ui.poster.PosterActivity
 import com.example.mymovies.R
-import com.example.mymovies.data.dto.MoviesSearchResponse
-import com.example.mymovies.data.network.IMDbApiService
 import com.example.mymovies.domain.models.Movie
-import retrofit2.Call
-import retrofit2.Callback
-import retrofit2.Response
-import retrofit2.Retrofit
-import retrofit2.converter.gson.GsonConverterFactory
+import com.example.mymovies.presentation.movies.MoviesSearchPresenter
+import com.example.mymovies.presentation.movies.MoviesView
+import com.example.mymovies.ui.movies.models.MoviesState
+import moxy.MvpActivity
+import moxy.presenter.InjectPresenter
+import moxy.presenter.ProvidePresenter
 
-class MoviesActivity : Activity() {
+class MoviesActivity : MvpActivity(), MoviesView {
 
-    private val imdbBaseUrl = "https://imdb-api.com"
+    @InjectPresenter
+    lateinit var moviesSearchPresenter: MoviesSearchPresenter
 
-    companion object {
-        private const val CLICK_DEBOUNCE_DELAY = 1000L
-        private const val SEARCH_DEBOUNCE_DELAY = 2000L
+    @ProvidePresenter
+    fun providePresenter(): MoviesSearchPresenter {
+        return Creator.provideMoviesSearchPresenter(
+            context = this.applicationContext,
+        )
     }
 
-    private val retrofit = Retrofit.Builder()
-        .baseUrl(imdbBaseUrl)
-        .addConverterFactory(GsonConverterFactory.create())
-        .build()
 
-    private val imdbService = retrofit.create(IMDbApiService::class.java)
+    private val imdbBaseUrl = "https://imdb-api.com"
+    companion object {
+        private const val CLICK_DEBOUNCE_DELAY = 1000L
+//        private var moviesSearchPresenter: MoviesSearchPresenter? = null
+    }
 
     private lateinit var queryInput: EditText
     private lateinit var placeholderMessage: TextView
     private lateinit var moviesList: RecyclerView
     private lateinit var progressBar: ProgressBar
 
-    private val movies = ArrayList<Movie>()
+    private var textWatcher: TextWatcher? = null
+
+
+//    private val retrofit = Retrofit.Builder()
+//        .baseUrl(imdbBaseUrl)
+//        .addConverterFactory(GsonConverterFactory.create())
+//        .build()
+//
+//    private val imdbService = retrofit.create(IMDbApiService::class.java)
+
 
     private val adapter = MoviesAdapter {
         if (clickDebounce()) {
@@ -60,98 +73,75 @@ class MoviesActivity : Activity() {
 
     private val handler = Handler(Looper.getMainLooper())
 
-    private val searchRunnable = Runnable { searchRequest() }
+//    override fun onStart() {
+//        super.onStart()
+//        moviesSearchPresenter?.attachView(this)
+//    }
+
+//    override fun onResume() {
+//        super.onResume()
+//        moviesSearchPresenter?.attachView(this)
+//    }
+
 
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_movies)
 
+
         placeholderMessage = findViewById(R.id.placeholderMessage)
         queryInput = findViewById(R.id.queryInput)
         moviesList = findViewById(R.id.locations)
         progressBar = findViewById(R.id.progressBar)
 
-        adapter.movies = movies
 
         moviesList.layoutManager = LinearLayoutManager(this, LinearLayoutManager.VERTICAL, false)
         moviesList.adapter = adapter
 
-        queryInput.addTextChangedListener(object : TextWatcher {
-            override fun beforeTextChanged(p0: CharSequence?, p1: Int, p2: Int, p3: Int) {
+         textWatcher = object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {
             }
 
-            override fun onTextChanged(p0: CharSequence?, p1: Int, p2: Int, p3: Int) {
-                searchDebounce()
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+                moviesSearchPresenter.searchDebounce(
+                    changedText = s?.toString() ?: ""
+                )
             }
 
-            override fun afterTextChanged(p0: Editable?) {
+            override fun afterTextChanged(s: Editable?) {
             }
-
-        })
-    }
-
-    override fun onDestroy() {
-        super.onDestroy()
-        handler.removeCallbacks(searchRunnable)
-    }
-
-    private fun searchRequest() {
-        if (queryInput.text.isNotEmpty()) {
-
-            placeholderMessage.visibility = View.GONE
-            moviesList.visibility = View.GONE
-            progressBar.visibility = View.VISIBLE
-
-            imdbService.findMovies(queryInput.text.toString()).enqueue(object :
-                Callback<MoviesSearchResponse> {
-                override fun onResponse(call: Call<MoviesSearchResponse>,
-                                        response: Response<MoviesSearchResponse>
-                ) {
-                    progressBar.visibility = View.GONE
-                    if (response.code() == 200) {
-                        movies.clear()
-                        if (response.body()?.results?.isNotEmpty() == true) {
-                            moviesList.visibility = View.VISIBLE
-                            movies.addAll(response.body()?.results!!)
-                            adapter.notifyDataSetChanged()
-                        }
-                        if (movies.isEmpty()) {
-                            showMessage(getString(R.string.nothing_found), "")
-                        } else {
-                            hideMessage()
-                        }
-                    } else {
-                        showMessage(getString(R.string.something_went_wrong), response.code().toString())
-                    }
-                }
-
-                override fun onFailure(call: Call<MoviesSearchResponse>, t: Throwable) {
-                    progressBar.visibility = View.GONE
-                    showMessage(getString(R.string.something_went_wrong), t.message.toString())
-                }
-            })
         }
+        textWatcher?.let { queryInput.addTextChangedListener(it) }
+
+
     }
 
-    private fun showMessage(text: String, additionalMessage: String) {
-        if (text.isNotEmpty()) {
-            placeholderMessage.visibility = View.VISIBLE
-            movies.clear()
-            adapter.notifyDataSetChanged()
-            placeholderMessage.text = text
-            if (additionalMessage.isNotEmpty()) {
-                Toast.makeText(applicationContext, additionalMessage, Toast.LENGTH_LONG)
-                    .show()
-            }
-        } else {
-            placeholderMessage.visibility = View.GONE
-        }
-    }
+//    override fun onPause() {
+//        super.onPause()
+//        moviesSearchPresenter?.detachView()
+//    }
+//
+//    override fun onStop() {
+//        super.onStop()
+//        moviesSearchPresenter?.detachView()
+//    }
+//
+//    override fun onSaveInstanceState(outState: Bundle) {
+//        super.onSaveInstanceState(outState)
+//        moviesSearchPresenter?.detachView()
+//    }
 
-    private fun hideMessage() {
-        placeholderMessage.visibility = View.GONE
-    }
+//    override fun onDestroy() {
+//        super.onDestroy()
+//        textWatcher?.let { queryInput.removeTextChangedListener(it) }
+////        moviesSearchPresenter?.detachView()
+//        moviesSearchPresenter?.onDestroy()
+//    }
+
+
+
+
 
     private fun clickDebounce() : Boolean {
         val current = isClickAllowed
@@ -162,8 +152,45 @@ class MoviesActivity : Activity() {
         return current
     }
 
-    private fun searchDebounce() {
-        handler.removeCallbacks(searchRunnable)
-        handler.postDelayed(searchRunnable, SEARCH_DEBOUNCE_DELAY)
+    override fun showToast(message: String) {
+        Toast.makeText(this, message, Toast.LENGTH_LONG).show()
     }
+
+     fun showLoading() {
+        moviesList.visibility = View.GONE
+        placeholderMessage.visibility = View.GONE
+        progressBar.visibility = View.VISIBLE
+    }
+
+     fun showError(errorMessage: String) {
+        moviesList.visibility = View.GONE
+        placeholderMessage.visibility = View.VISIBLE
+        progressBar.visibility = View.GONE
+
+        placeholderMessage.text = errorMessage
+    }
+
+     fun showEmpty(emptyMessage: String) {
+        showError(emptyMessage)
+    }
+
+     fun showContent(movies: List<Movie>) {
+        moviesList.visibility = View.VISIBLE
+        placeholderMessage.visibility = View.GONE
+        progressBar.visibility = View.GONE
+
+        adapter.movies.clear()
+        adapter.movies.addAll(movies)
+        adapter.notifyDataSetChanged()
+    }
+
+    override fun render(state: MoviesState) {
+        when (state) {
+            is MoviesState.Loading -> showLoading()
+            is MoviesState.Content -> showContent(state.movies)
+            is MoviesState.Error -> showError(state.errorMessage)
+            is MoviesState.Empty -> showEmpty(state.message)
+        }
+    }
+
 }
